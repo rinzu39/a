@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>TETRIS</title>
+<style>
+body {
+  margin:0; padding:0; font-family:sans-serif;
+  background:#000; color:#fff; text-align:center;
+}
+#game {
+  margin:10px auto;
+  width:90vw; max-width:600px;
+  aspect-ratio:10/20;
+  position:relative;
+  border:2px solid #fff;
+  background:linear-gradient(to bottom,#0a1f3c,#122f5e);
+  touch-action:none;
+}
+.block {
+  position:absolute;
+  box-sizing:border-box;
+  border:1px solid #000;
+  transition:background 0.2s;
+}
+#score,#level { font-size:1.5em; margin:5px; }
+#controls {
+  display:flex;
+  justify-content:center;
+  flex-wrap:wrap;
+  margin:10px;
+}
+#controls button {
+  font-size:1.5em; padding:15px 20px; margin:5px; border-radius:12px;
+}
+input[type=range]{width:150px;}
+</style>
+</head>
+<body>
+<h1>TETRIS</h1>
+<div id="nameArea">
+  <input type="text" id="nameInput" placeholder="名前を入力">
+  <button onclick="startGame()">ゲーム開始</button>
+</div>
+<div id="score"></div>
+<div id="level"></div>
+<div id="game"></div>
+
+<div id="controls">
+  <button onclick="moveLeft()">← 左</button>
+  <button onclick="rotate()">⟳ 回転</button>
+  <button onclick="moveRight()">→ 右</button>
+  <button onclick="moveDown()">↓ 下</button>
+  <button onclick="holdBlock()">H ホールド</button>
+</div>
+
+<div>
+  テーマ:
+  <button onclick="setTheme(0)">ダーク</button>
+  <button onclick="setTheme(1)">ライト</button>
+  <button onclick="setTheme(2)">ネオン</button>
+  <button onclick="setTheme(3)">宇宙</button>
+  <button onclick="setTheme(4)">レトロ</button>
+</div>
+
+<div>
+  BGM音量: <input type="range" id="bgmVolume" min="0" max="1" step="0.1" value="0.5">
+  効果音音量: <input type="range" id="seVolume" min="0" max="1" step="0.1" value="0.5">
+</div>
+
+<audio id="bgm" loop src="bgm.mp3"></audio>
+<audio id="se" src="se.mp3"></audio>
+
+<script>
+const game=document.getElementById("game");
+const COLS=10,ROWS=20;
+let BLOCK=Math.floor(Math.min(game.offsetWidth/COLS,game.offsetHeight/ROWS));
+let grid=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+let current,currentX,currentY,currentColor;
+let score=0,level=1,linesCleared=0;
+let heldBlock=null,canHold=true;
+let playerName="";
+let touchStartX=0,touchStartY=0;
+
+const bgm=document.getElementById("bgm");
+const se=document.getElementById("se");
+document.getElementById("bgmVolume").oninput=e=>{bgm.volume=e.target.value;}
+document.getElementById("seVolume").oninput=e=>{se.volume=e.target.value;}
+
+const shapes=[
+  [[1,1,1,1]],[[1,1],[1,1]],[[0,1,0],[1,1,1]],
+  [[1,1,0],[0,1,1]],[[0,1,1],[1,1,0]],
+  [[1,0,0],[1,1,1]],[[0,0,1],[1,1,1]]
+];
+
+// カラフルテーマ
+const themes=[
+  {bg:"linear-gradient(to bottom,#0a1f3c,#122f5e)", colors:["#0ff","#ff0","#f0f","#f80","#0f8","#08f","#f08"]}, // ダーク
+  {bg:"linear-gradient(to bottom,#a0e7ff,#ffffff)", colors:["#f00","#0f0","#00f","#ff0","#f0f","#0ff","#aaa"]}, // ライト
+  {bg:"linear-gradient(to bottom,#4b0082,#ff00ff)", colors:["#ff0080","#00ff80","#0080ff","#ffff00","#ff8000","#00ffff","#ff00ff"]}, // ネオン
+  {bg:"linear-gradient(to bottom,#004d66,#660099)", colors:["#fff","#f8f","#66f","#88f","#aaf","#f0f","#ff0"]}, // 宇宙
+  {bg:"linear-gradient(to bottom,#ffcc66,#ff9966)", colors:["#f88","#8f8","#88f","#ff8","#f8f","#8ff","#888"]}  // レトロ
+];
+let currentTheme=0;
+setTheme(0);
+
+function setTheme(index){currentTheme=index;game.style.background=themes[index].bg;}
+
+function startGame(){
+  let input=document.getElementById("nameInput").value;
+  playerName=input?input:"名無し";
+  document.getElementById("nameArea").style.display="none";
+  document.getElementById("score").innerText=playerName+"のスコア: 0";
+  document.getElementById("level").innerText="レベル: 1";
+  spawn(); draw();
+  bgm.play();
+  window.gameInterval=setInterval(moveDown,2000);
+}
+
+function draw(){
+  BLOCK=Math.floor(Math.min(game.offsetWidth/COLS,game.offsetHeight/ROWS));
+  game.innerHTML="";
+  for(let y=0;y<ROWS;y++){
+    for(let x=0;x<COLS;x++){
+      if(grid[y][x]){
+        let div=document.createElement("div");
+        div.className="block";
+        div.style.width=BLOCK+"px"; div.style.height=BLOCK+"px";
+        div.style.top=y*BLOCK+"px"; div.style.left=x*BLOCK+"px";
+        div.style.background=grid[y][x];
+        game.appendChild(div);
+      }
+    }
+  }
+  if(current){
+    for(let y=0;y<current.length;y++){
+      for(let x=0;x<current[y].length;x++){
+        if(current[y][x]){
+          let div=document.createElement("div");
+          div.className="block";
+          div.style.width=BLOCK+"px"; div.style.height=BLOCK+"px";
+          div.style.top=(currentY+y)*BLOCK+"px"; div.style.left=(currentX+x)*BLOCK+"px";
+          div.style.background=currentColor;
+          game.appendChild(div);
+        }
+      }
+    }
+  }
+}
+
+function spawn(){
+  let idx=Math.floor(Math.random()*shapes.length);
+  current=shapes[idx]; currentColor=themes[currentTheme].colors[idx];
+  currentX=3; currentY=0; canHold=true;
+  if(collide(currentX,currentY)){ alert(playerName+"のゲームオーバー！スコア:"+score); clearInterval(window.gameInterval); location.reload(); }
+}
+
+function collide(x,y){
+  for(let i=0;i<current.length;i++){
+    for(let j=0;j<current[i].length;j++){
+      if(current[i][j]){
+        let newX=x+j,newY=y+i;
+        if(newX<0||newX>=COLS||newY>=ROWS) return true;
+        if(grid[newY][newX]) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function freeze(){
+  for(let i=0;i<current.length;i++){
+    for(let j=0;j<current[i].length;j++){
+      if(current[i][j]) grid[currentY+i][currentX+j]=currentColor;
+    }
+  }
+  clearLines(); spawn();
+}
+
+function clearLines(){
+  for(let y=ROWS-1;y>=0;y--){
+    if(grid[y].every(c=>c)){
+      grid.splice(y,1); grid.unshift(Array(COLS).fill(0));
+      linesCleared++; score+=10; se.play();
+      if(linesCleared%5===0){
+        level++;
+        clearInterval(window.gameInterval);
+        window.gameInterval=setInterval(moveDown,Math.max(2000-(level-1)*200,200));
+        document.getElementById("level").innerText="レベル: "+level;
+      }
+      document.getElementById("score").innerText=playerName+"のスコア: "+score;
+      y++;
+    }
+  }
+}
+
+function moveDown(){if(!collide(currentX,currentY+1)) currentY++; else freeze(); draw();}
+function moveLeft(){if(!collide(currentX-1,currentY)){currentX--;draw();}}
+function moveRight(){if(!collide(currentX+1,currentY)){currentX++;draw();}}
+function rotate(){let temp=current[0].map((_,i)=>current.map(r=>r[i])).reverse();let old=current;current=temp;if(collide(currentX,currentY)) current=old;draw();}
+function holdBlock(){if(!canHold) return; let temp=current,tempColor=currentColor; if(heldBlock){current=heldBlock.block; currentColor=heldBlock.color;} else spawn(); heldBlock={block:temp,color:tempColor}; canHold=false; draw();}
+
+// タッチ操作
+game.addEventListener('touchstart',e=>{touchStartX=e.touches[0].clientX; touchStartY=e.touches[0].clientY;});
+game.addEventListener('touchend',e=>{
+  let dx=e.changedTouches[0].clientX-touchStartX; let dy=e.changedTouches[0].clientY-touchStartY;
+  if(Math.abs(dx)>Math.abs(dy)){ if(dx>20) moveRight(); else if(dx<-20) moveLeft(); }
+  else { if(dy<-20) rotate(); else if(dy>20) moveDown(); }
+});
+</script>
+</body>
+</html>
